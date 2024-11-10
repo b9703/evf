@@ -23,7 +23,7 @@ void evf_list_init(struct Evf_list * p_list);
 uint32_t evf_list_get_length(struct Evf_list const * p_list);
 
 void evf_list_insert_after(struct Evf_list * p_list,
-                           struct Evf_list_item * p_to_insert,
+                          struct Evf_list_item * p_to_insert,
                            struct Evf_list_item * p_ref_spot);
                            
 void evf_list_insert_before(struct Evf_list * p_list,
@@ -33,6 +33,8 @@ void evf_list_insert_before(struct Evf_list * p_list,
 void evf_list_append(struct Evf_list * p_list, struct Evf_list_item * p_to_append);
 
 void evf_list_remove_item(struct Evf_list * p_list, struct Evf_list_item * p_item);
+
+bool evf_list_check_item_is_head(struct Evf_list * p_list, struct Evf_list_item * p_item);
 
 
 struct Evf_list_item * evf_list_get_by_index(struct Evf_list * p_list, uint32_t index);

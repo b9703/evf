@@ -16,6 +16,20 @@
 /*
  *
  */
+#ifndef EVF_MAX_NUM_EVENT_TYPES
+#define EVF_MAX_NUM_EVENT_TYPES   32
+#endif 
+
+/*
+ *
+ */
+#ifndef EVF_EVENT_QUEUE_LENGTH   
+#define EVF_EVENT_QUEUE_LENGTH   16
+#endif 
+
+/*
+ *
+ */
 #ifndef EVF_ACTIVE_OBJECT_MAX_NAME_LENGTH
 #define EVF_ACTIVE_OBJECT_MAX_NAME_LENGTH    32
 #endif
@@ -34,8 +48,9 @@
 #define EVF_ACTIVE_OBJECT_MAX_NUM_SUBSCRIPTIONS    32
 #endif
 
-#define EVF_EVENT_TYPE_NULL   -3
-#define EVF_EVENT_TYPE_TIMER_WENT_OFF   -1
+#define EVF_EVENT_TYPE_NULL              -3
+#define EVF_EVENT_TYPE_SHUTDOWN_PENDING  -2
+#define EVF_EVENT_TYPE_TIMER_FINISHED    -1
 
 /*
  *
@@ -63,6 +78,15 @@ enum Evf_active_object_status
 {
     EVF_ACTIVE_OBJECT_STATUS_RUNNING,
     EVF_ACTIVE_OBJECT_STATUS_SHUTDOWN,
+};
+
+// Event queue (implemented as a circular buffer).
+struct Evf_event_queue
+{
+    struct Evf_event * p_event_buffer[EVF_EVENT_QUEUE_LENGTH];
+    uint32_t ri;
+    uint32_t wi;
+    uint32_t num_in_queue;
 };
 
 struct Evf_active_object;
@@ -94,6 +118,13 @@ struct Evf_event
     uint32_t ref_count;
 };
 
+// This type of event is posted to an active object when one of its timer's (see Evf_timer) finishes.
+struct Evf_event_timer_finished
+{
+    struct Evf_event base; // The type is EVF_EVENT_TYPE_TIMER_FINISHED.
+    uint32_t timer_id;
+};
+
 /* p_self is a pointer to the active object that the handler belongs to. To access instance specific
  * data you should create a 'derived' class by embedding an instance of struct Evf_active_object at
  * the beginning of the derived class' struct. For example...
@@ -116,25 +147,50 @@ struct Evf_event
 typedef enum Evf_status (*Evf_event_handler)(struct Evf_active_object * p_self,
                                              struct Evf_event const * p_event);
 
-/* The 'base class' for active objects. 
+// See evf_register_event_destructor for more information.
+typedef void (*Evf_event_destructor)(struct Evf_event * p_event);
+
+/* The 'base class' for active objects. When defining your own active objects you must embed an  
+ * instance of this struct as the first member. For example...
+ * struct Adc_reader_active_object
+ * {
+ *     struct Evf_active_object base; // Note: name does not matter.
+ *     uint32_t adc_channel_number;
+ *     uint32_t reading_period_ms; 
+ * };
  * 
+ * Then when the initialisation of your active object type might look like...
+ * struct Adc_reader_active_object channel_1_reader_ao = {
+ *     .base = {
+ *          .name = "ADC Channel 1 Reader",
+ *          .priority = 3,
+ *          .handle_event = &adc_reader_handle_event,
+ *          .event_type_subscriptions = {
+ *              EVENT_TYPE_ADC_SAMPLING_COMPLETE,
+ *              EVENT_TYPE_ADC_ERROR,
+ *              EVF_EVENT_TYPE_NULL
+ *          }
+ *      },
+ *     .adc_channel_number = 1,
+ *     .reading_period_ms  = 50,
+ * };
  */
 struct Evf_active_object
 {
     /*
      *
      */
-    char name[EVF_ACTIVE_OBJECT_MAX_NAME_LENGTH+1];
+    char const name[EVF_ACTIVE_OBJECT_MAX_NAME_LENGTH+1];
 
     /* Priority level (0 is the maximum priority) affect scheduling. A higher priority active 
      * object will be scheduled before any lower priority active object
      */
-    uint8_t priority; 
+    uint8_t const priority; 
 
     /* When the active object gets scheduled by the EVF, an event is taken from the front of the
      * event queue and passed to the handle_event function. This is how all event handling is done.
      */
-    Evf_event_handler handle_event;
+    Evf_event_handler const handle_event;
 
     /* When an event of a subscribed event type is published, a reference to that event will be
      * delivered to the active object's event queue (unless it was the one that published it).
@@ -142,12 +198,28 @@ struct Evf_active_object
      * Note: EVF-defined events (e.g. EVF_EVENT_TYPE_TIMER_WENT_OFF) must not be in this list.
      * Note: this list must be terminated by EVF_EVENT_TYPE_NULL, even when not in use. 
      */ 
-    int32_t event_type_subscriptions[EVF_ACTIVE_OBJECT_MAX_NUM_SUBSCRIPTIONS+1];
- 
-    /* Only for EVF-internal use. This list is used as a queue for events that are to be passed to  
-     * the active object's handler function when it gets scheduled by the EVF. 
-     */
-    struct Evf_list event_queue;     
+    int32_t const event_type_subscriptions[EVF_ACTIVE_OBJECT_MAX_NUM_SUBSCRIPTIONS+1];
+
+    // For EVF-internal use only.
+    struct Evf_event_queue event_queue;
+};
+
+
+struct Evf_timer
+{
+    // The owner active object is who will receive the timer event when the timer finishes. 
+    struct Evf_active_object const * p_owner;
+
+    // 
+    uint32_t const timer_id;
+
+    uint64_t const time_ms;
+    bool const is_periodic;
+
+    // For EVF-internal usage only.
+    uint64_t finish_timestamp;
+    bool is_running;
+    struct Evf_list_item item;
 };
 
 /**************************************************************************************************
@@ -174,8 +246,33 @@ enum Evf_ret evf_publish(struct Evf_event * p_event);
 enum Evf_ret evf_post(struct Evf_active_object * p_receiver, struct Evf_event * p_event);
 
 /**************************************************************************************************
+ * Starts (or restarts if it is already started) a timer. Note: only the pointer is copied, timers
+ * must have static lifetime. 
+ * Note: should be called only in active object code (e.g. not from an ISR).
+ *************************************************************************************************/
+enum Evf_ret evf_timer_start(struct Evf_timer * p_timer);
+
+/**************************************************************************************************
+ * Stops a timer. Has no effect if the timer is not running.
+ *************************************************************************************************/
+enum Evf_ret evf_timer_stop(struct Evf_timer * p_timer);
+
+/**************************************************************************************************
  * 
  *************************************************************************************************/
 enum Evf_status evf_task();
+
+/**************************************************************************************************
+ * Registering a destructor for an event type means that everytime an event of that type is 
+ * finished being handled by all of the active objects that were given the event for handling, the
+ * EVF will handle the cleanup by using the registered destructor. This is useful if you have 
+ * event types that require cleanup e.g. contain pointers to dynamic memory.
+ *************************************************************************************************/
+void evf_register_event_destructor(uint32_t event_type, Evf_event_destructor destructor);
+
+/**************************************************************************************************
+ * 
+ *************************************************************************************************/
+void evf_event_set_type(void * p_event, uint32_t type);
 
 #endif // EVF_H
