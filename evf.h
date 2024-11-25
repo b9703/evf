@@ -1,3 +1,6 @@
+/**************************************************************************************************
+ * 
+ *************************************************************************************************/
 
 #ifndef EVF_H
 #define EVF_H
@@ -6,55 +9,36 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-/*
- *
- */
 #ifndef EVF_MAX_NUM_ACTIVE_OBJECTS
 #define EVF_MAX_NUM_ACTIVE_OBJECTS    32
 #endif 
 
-/*
- *
- */
-#ifndef EVF_MAX_NUM_EVENT_TYPES
-#define EVF_MAX_NUM_EVENT_TYPES   32
-#endif 
+#ifndef EVF_MAX_NUM_USER_DEFINED_EVENT_TYPES
+#define EVF_MAX_NUM_USER_DEFINED_EVENT_TYPES   32
+#endif
 
-/*
- *
- */
 #ifndef EVF_EVENT_QUEUE_LENGTH   
 #define EVF_EVENT_QUEUE_LENGTH   16
 #endif 
 
-/*
- *
- */
 #ifndef EVF_ACTIVE_OBJECT_MAX_NAME_LENGTH
 #define EVF_ACTIVE_OBJECT_MAX_NAME_LENGTH    32
 #endif
 
-/*
- *
- */
 #ifndef EVF_ACTIVE_OBJECT_PRIORITY_MAX
 #define EVF_ACTIVE_OBJECT_PRIORITY_MAX    32
 #endif
 
-/*
- *
- */
 #ifndef EVF_ACTIVE_OBJECT_MAX_NUM_SUBSCRIPTIONS     
 #define EVF_ACTIVE_OBJECT_MAX_NUM_SUBSCRIPTIONS    32
 #endif
 
+// EVF-defined event types.
 #define EVF_EVENT_TYPE_NULL              -3
 #define EVF_EVENT_TYPE_SHUTDOWN_PENDING  -2
 #define EVF_EVENT_TYPE_TIMER_FINISHED    -1
 
-/*
- *
- */
+// User-defined event types must be sequential, starting at this number (inclusive).
 #define EVF_USER_EVENT_TYPES_START  0
 
 /* A convenient macro to use when allocating events. For example...
@@ -80,6 +64,10 @@ enum Evf_active_object_status
     EVF_ACTIVE_OBJECT_STATUS_SHUTDOWN,
 };
 
+// Forward-declarations.
+struct Evf_active_object;
+struct Evf_event;
+
 // Event queue (implemented as a circular buffer).
 struct Evf_event_queue
 {
@@ -89,7 +77,6 @@ struct Evf_event_queue
     uint32_t num_in_queue;
 };
 
-struct Evf_active_object;
 
 /* The 'base class' for events. The type field is set by the user, whereas the ref_count field
  * is strictly for EVF-internal usage. Embed an instance of this struct as the first member of
@@ -204,7 +191,6 @@ struct Evf_active_object
     struct Evf_event_queue event_queue;
 };
 
-
 struct Evf_timer
 {
     // The owner active object is who will receive the timer event when the timer finishes. 
@@ -225,7 +211,7 @@ struct Evf_timer
 /**************************************************************************************************
  * Initialises the EVF. Must be done before any other EVF operations.  
  *************************************************************************************************/
-enum Evf_ret evf_init(uint32_t num_event_types);
+enum Evf_ret evf_init();
 
 /**************************************************************************************************
  * Once an active object is registered it can receive events that it has subscribed to/events that
@@ -235,20 +221,21 @@ enum Evf_ret evf_register_active_object(struct Evf_active_object * p_ao);
 
 /**************************************************************************************************
  * Publishes an event to all of the registered active objects that are subscribed to the event
- * type in question. Note: the event must have been allocated using the evf_malloc function.  
+ * type in question. The event must have been allocated using the evf_malloc function. Use NULL
+ * for p_publisher if the publish is not being done by an active object.  
  *************************************************************************************************/
-enum Evf_ret evf_publish(struct Evf_event * p_event);
+enum Evf_ret evf_publish(struct Evf_active_object * p_publisher, struct Evf_event * p_event);
 
 /**************************************************************************************************
- * Posts an event directly to the specified active object. Note: the event must have been allocated
- * using the evf_malloc function. 
+ * Posts an event directly to the specified active object. The event must have been allocated using 
+ * the evf_malloc function. 
  *************************************************************************************************/
 enum Evf_ret evf_post(struct Evf_active_object * p_receiver, struct Evf_event * p_event);
 
 /**************************************************************************************************
  * Starts (or restarts if it is already started) a timer. Note: only the pointer is copied, timers
- * must have static lifetime. 
- * Note: should be called only in active object code (e.g. not from an ISR).
+ * must have static lifetime. Note: should be called only in active object code (e.g. not from
+ * an ISR).
  *************************************************************************************************/
 enum Evf_ret evf_timer_start(struct Evf_timer * p_timer);
 
@@ -258,9 +245,17 @@ enum Evf_ret evf_timer_start(struct Evf_timer * p_timer);
 enum Evf_ret evf_timer_stop(struct Evf_timer * p_timer);
 
 /**************************************************************************************************
- * 
+ * This function must be called in a loop for the active objects to handle events.
  *************************************************************************************************/
 enum Evf_status evf_task();
+
+/**************************************************************************************************
+ * Checks if there are any events waiting to be handled in any active object queues. If there are
+ * then there is work to be done by the EVF. Only intended for use in embedded systems to 
+ * determine if the system can go into low-power mode (LPM). Note: must be called within a critical
+ * section.
+ *************************************************************************************************/
+bool evf_check_if_work_to_do();
 
 /**************************************************************************************************
  * Registering a destructor for an event type means that everytime an event of that type is 
