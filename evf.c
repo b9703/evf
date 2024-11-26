@@ -326,7 +326,7 @@ static void register_active_object_event_type_subscriptions(struct Evf_active_ob
  * EVF API function implementations
  *************************************************************************************************/
 
-enum Evf_ret evf_init()
+void evf_init()
 {
     EVF_ASSERT(evf_state == EVF_STATE_UNINIT);
     num_registered_aos = 0;
@@ -336,7 +336,7 @@ enum Evf_ret evf_init()
     evf_state = EVF_STATE_INIT_NOT_RUNNING;
 }
 
-enum Evf_ret evf_register_active_object(struct Evf_active_object * p_ao)
+void evf_register_active_object(struct Evf_active_object * p_ao)
 {
     EVF_ASSERT(evf_state == EVF_STATE_INIT_NOT_RUNNING);
     EVF_ASSERT(p_ao != NULL);
@@ -345,7 +345,7 @@ enum Evf_ret evf_register_active_object(struct Evf_active_object * p_ao)
     register_active_object_event_type_subscriptions(p_ao);
 }
 
-enum Evf_ret evf_publish(struct Active_object * p_publisher, struct Evf_event * p_event)
+void evf_publish(struct Active_object * p_publisher, struct Evf_event * p_event)
 {
     EVF_ASSERT(p_event != NULL);
     EVF_ASSERT(check_evf_state_allows_active_objects_to_receive_events());
@@ -370,7 +370,7 @@ enum Evf_ret evf_publish(struct Active_object * p_publisher, struct Evf_event * 
     }
 };
 
-enum Evf_ret evf_post(struct Evf_active_object * p_receiver, struct Evf_event * p_event)
+bool evf_post(struct Evf_active_object * p_receiver, struct Evf_event * p_event)
 {
     EVF_ASSERT(check_evf_state_allows_active_objects_to_receive_events());
     EVF_ASSERT(p_receiver != NULL);
@@ -386,30 +386,40 @@ enum Evf_ret evf_post(struct Evf_active_object * p_receiver, struct Evf_event * 
     return okay;
 };
 
-enum Evf_ret evf_timer_start(struct Evf_timer * p_timer)
+void evf_timer_init(struct Evf_timer * p_timer)
+{
+    // -1 indicates that the timer is not running i.e. not in the running timers list.
+    p_timer->finish_timestamp = -1;
+    evf_list_item_init(&p_timer->item);
+}
+
+void evf_timer_start(struct Evf_timer * p_timer)
 {
     EVF_ASSERT(p_timer != NULL);
     EVF_ASSERT(p_timer->p_owner != NULL);
 
     evf_critical_section_enter();
 
-    if (p_timer->is_running)
+    if (p_timer->finish_timestamp != -1)
     {
         running_timers_list_remove_timer(p_timer);
     }
-
     p_timer->finish_time = evf_get_timestamp_ms() + p_timer->time_ms;
-
     running_timers_list_add_timer(p_timer);
-    p_timer->is_running = true;
 
     evf_critical_section_exit();
 }
 
-enum Evf_ret evf_timer_stop(struct Evf_timer * p_timer)
+void evf_timer_stop(struct Evf_timer * p_timer)
 {
-    // 
+    EVF_ASSERT(p_timer != NULL);
 
+    evf_critical_section_enter();
+
+    running_timers_list_remove_timer(p_timer);
+    p_timer->finish_timestamp = -1;
+
+    evf_critical_section_exit();
 }
 
 enum Evf_status evf_task()

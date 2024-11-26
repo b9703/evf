@@ -20,6 +20,8 @@ struct Evf_list
 
 void evf_list_init(struct Evf_list * p_list);
 
+void evf_list_item_init(struct Evf_list_item * p_item);
+
 uint32_t evf_list_get_length(struct Evf_list const * p_list);
 
 void evf_list_insert_after(struct Evf_list * p_list,

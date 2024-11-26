@@ -3,14 +3,32 @@
 #include "../evf.h"
 #include <assert.h>
 #include <stdio.h>
+#include <stdlib.h>
 
 enum Test_event_types
 {
-    TEST_EVENT_TYPE_1 = EVF_USER_EVENT_TYPES_START,
-    TEST_EVENT_TYPE_2,
-    TEST_EVENT_TYPE_3,
+    EVENT_TYPE_MSG_RECEIVED = EVF_USER_EVENT_TYPES_START,
+    EVENT_TYPE_BUTTON_PRESSED,
+    EVENT_TYPE_ADC_READING,
 };
 
+struct Event_msg_received
+{
+    struct Evf_event base;
+    char msg[256];
+};
+
+struct Event_button_pressed
+{
+    struct Evf_event base;
+    int button_id;
+};
+
+struct Event_adc_reading
+{
+    struct Evf_event base;
+    int sample;
+};
 
 struct Test_active_object_a
 {
@@ -46,7 +64,8 @@ struct Test_active_object_a test_active_object_a1 = {
         .priority     = 10,
         .handle_event = &test_active_object_a_handler,
         .event_type_subscriptions = {
-            TEST_EVENT_TYPE_1,
+            EVENT_TYPE_ADC_READING,
+            EVENT_TYPE_BUTTON_PRESSED,
             EVF_EVENT_TYPE_NULL,
         }
     },
@@ -59,8 +78,8 @@ struct Test_active_object_a test_active_object_a2 = {
         .priority     = 11,
         .handle_event = &test_active_object_a_handler,
         .event_type_subscriptions = {
-            TEST_EVENT_TYPE_2,
-            TEST_EVENT_TYPE_1,
+            EVENT_TYPE_MSG_RECEIVED,
+            EVENT_TYPE_ADC_READING,
             EVF_EVENT_TYPE_NULL,
         }
     },
@@ -73,8 +92,8 @@ struct Test_active_object_b test_active_object_b1 = {
         .priority     = 9,
         .handle_event = &test_active_object_b_handler,
         .event_type_subscriptions = {
-            TEST_EVENT_TYPE_1,
-            TEST_EVENT_TYPE_3,
+            EVENT_TYPE_BUTTON_PRESSED,
+            EVENT_TYPE_MSG_RECEIVED,
             EVF_EVENT_TYPE_NULL,
         }
     },
@@ -90,13 +109,22 @@ int main()
     evf_register_active_object(&test_active_object_a2.base);
     evf_register_active_object(&test_active_object_b1.base);
 
-    
-    evf_post()
+    struct Event_adc_reading * p_event_1 = EVF_EVENT_ALLOC(struct Event_adc_reading);     
+    evf_event_set_type(p_event_1, EVENT_TYPE_ADC_READING);
+    p_event_1->sample = 512;
 
-    while (true)
+    struct Event_button_pressed * p_event_2 = EVF_EVENT_ALLOC(struct Event_button_pressed);     
+    evf_event_set_type(p_event_2, EVENT_TYPE_BUTTON_PRESSED);
+    p_event_2->button_id = 1;
+
+    struct Event_msg_received * p_event_3 = EVF_EVENT_ALLOC(struct Event_msg_received);     
+    evf_event_set_type(p_event_3, EVENT_TYPE_MSG_RECEIVED);
+    sprintf(p_event_3->msg, "Hello World"); 
+
+    for (uint32_t i = 0; i < 3; i++)
     {
         evf_task();
     }
-
+    
     return 0;
 }

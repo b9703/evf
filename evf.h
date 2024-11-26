@@ -33,6 +33,10 @@
 #define EVF_ACTIVE_OBJECT_MAX_NUM_SUBSCRIPTIONS    32
 #endif
 
+#ifndef EVF_SHUTDOWN_TIME_MS     
+#define EVF_SHUTDOWN_TIME_MS    5000
+#endif
+
 // EVF-defined event types.
 #define EVF_EVENT_TYPE_NULL              -3
 #define EVF_EVENT_TYPE_SHUTDOWN_PENDING  -2
@@ -44,13 +48,7 @@
 /* A convenient macro to use when allocating events. For example...
  * struct My_custom_event * p_event = EVF_EVENT_ALLOC(struct My_custom_event);
  */
-#define EVF_EVENT_ALLOC(type)   evf_malloc(sizeof(type));
-
-enum Evf_ret
-{
-    EVF_RET_SUCCESS,
-    EVF_RET_FAILED,
-};
+#define EVF_EVENT_ALLOC(date_type)   evf_malloc(sizeof(date_type));
 
 enum Evf_status
 {
@@ -131,8 +129,8 @@ struct Evf_event_timer_finished
  * not. If it has stopped running then the EVF will de-register it. TODO: how do we handle this?
  * active object memory may need to be freed if it is dynamic. 
  */
-typedef enum Evf_status (*Evf_event_handler)(struct Evf_active_object * p_self,
-                                             struct Evf_event const * p_event);
+typedef enum Evf_active_object_status (*Evf_event_handler)(struct Evf_active_object * p_self,
+                                                           struct Evf_event const * p_event);
 
 // See evf_register_event_destructor for more information.
 typedef void (*Evf_event_destructor)(struct Evf_event * p_event);
@@ -203,51 +201,68 @@ struct Evf_timer
     bool const is_periodic;
 
     // For EVF-internal usage only.
-    uint64_t finish_timestamp;
-    bool is_running;
+    int64_t finish_timestamp;
     struct Evf_list_item item;
 };
 
 /**************************************************************************************************
  * Initialises the EVF. Must be done before any other EVF operations.  
  *************************************************************************************************/
-enum Evf_ret evf_init();
+void evf_init();
 
 /**************************************************************************************************
  * Once an active object is registered it can receive events that it has subscribed to/events that
  * have been posted to it. All registrations must be done prior to calling evf_task.
  *************************************************************************************************/
-enum Evf_ret evf_register_active_object(struct Evf_active_object * p_ao);
+void evf_register_active_object(struct Evf_active_object * p_ao);
 
 /**************************************************************************************************
  * Publishes an event to all of the registered active objects that are subscribed to the event
  * type in question. The event must have been allocated using the evf_malloc function. Use NULL
  * for p_publisher if the publish is not being done by an active object.  
  *************************************************************************************************/
-enum Evf_ret evf_publish(struct Evf_active_object * p_publisher, struct Evf_event * p_event);
+void evf_publish(struct Evf_active_object * p_publisher, struct Evf_event * p_event);
 
 /**************************************************************************************************
  * Posts an event directly to the specified active object. The event must have been allocated using 
- * the evf_malloc function. 
+ * the evf_malloc function. May fail (return false) if the receiver's queue is already full. 
  *************************************************************************************************/
-enum Evf_ret evf_post(struct Evf_active_object * p_receiver, struct Evf_event * p_event);
+bool evf_post(struct Evf_active_object * p_receiver, struct Evf_event * p_event);
+
+/**************************************************************************************************
+ * Timers must be initialised before they are used.
+ *************************************************************************************************/
+void evf_timer_init(struct Evf_timer * p_timer);
 
 /**************************************************************************************************
  * Starts (or restarts if it is already started) a timer. Note: only the pointer is copied, timers
  * must have static lifetime. Note: should be called only in active object code (e.g. not from
  * an ISR).
  *************************************************************************************************/
-enum Evf_ret evf_timer_start(struct Evf_timer * p_timer);
+void evf_timer_start(struct Evf_timer * p_timer);
 
 /**************************************************************************************************
  * Stops a timer. Has no effect if the timer is not running.
  *************************************************************************************************/
-enum Evf_ret evf_timer_stop(struct Evf_timer * p_timer);
+void evf_timer_stop(struct Evf_timer * p_timer);
 
 /**************************************************************************************************
  * This function must be called in a loop for the active objects to handle events.
  *************************************************************************************************/
 enum Evf_status evf_task();
+
+/**************************************************************************************************
+ * Signals the active objects to finish up what they are doing are shutdown. This is done by 
+ * sending an event of type EVF_EVENT_TYPE_SHUTDOWN_PENDING to all of the active objects. From
+ * this moment, the active objects have EVF_SHUTDOWN_TIME_MS milliseconds before the EVF will
+ * force shutdown. When an active object is ready to shutdown it should return a value of 
+ * EVF_ACTIVE_OBJECT_STATUS_SHUTDOWN from its event handler function. It does not have to be the
+ * return value for the handling of the shutdown event e.g. an active object may need to save 
+ * some data to an SPI flash chip which may involve several events being handled before shutdown
+ * can be done. Once all active objects have shutdown, the evf_task function will return 
+ * EVF_STATUS_SHUTDOWN and do no further work.
+ *************************************************************************************************/
+void evf_signal_shutdown();
 
 /**************************************************************************************************
  * Checks if there are any events waiting to be handled in any active object queues. If there are

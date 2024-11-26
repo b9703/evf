@@ -26,6 +26,12 @@ void evf_list_init(struct Evf_list * p_list)
     p_list->length = 0;
 }
 
+void evf_list_item_init(struct Evf_list_item * p_item)
+{
+    p_item->p_next = NULL;
+    p_item->p_prev = NULL;
+}
+
 uint32_t evf_list_get_length(struct Evf_list const * p_list)
 {
     return p_list->length;
